@@ -10,12 +10,11 @@ require("dotenv").config();
 // Import routes
 const authRoutes = require("./routes/auth");
 const caseRoutes = require("./routes/cases");
-const uploadRoutes = require("./routes/upload");
+// const uploadRoutes = require("./routes/upload");
 const healthRoutes = require("./routes/health");
 
 // Import middleware
 const errorHandler = require("./middleware/errorHandler");
-const rateLimiter = require("./middleware/rateLimiter");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -39,14 +38,11 @@ app.use(
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Rate limiting
-app.use("/api/", rateLimiter);
-
 // Routes
 app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/cases", caseRoutes);
-app.use("/api/upload", uploadRoutes);
+// app.use("/api/upload", uploadRoutes);
 
 // Error handling middleware (must be last)
 app.use(errorHandler);
