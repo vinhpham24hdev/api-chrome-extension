@@ -104,7 +104,7 @@ const s3Utils = {
   generatePresignedPost: async (key, fileType, fileSize, expiresIn = 3600) => {
     try {
       const conditions = [
-        ["content-length-range", 1024, MAX_FILE_SIZE], // 1KB to MAX_FILE_SIZE
+        ["content-length-range", 1024, MAX_FILE_SIZE],
         ["starts-with", "$Content-Type", fileType.split("/")[0] + "/"],
       ];
 
@@ -304,44 +304,6 @@ const s3Utils = {
       return true;
     } catch (error) {
       throw new Error(`Failed to setup CORS: ${error.message}`);
-    }
-  },
-
-  // Setup lifecycle configuration
-  setupLifecycle: async () => {
-    try {
-      const lifecycleConfiguration = {
-        Rules: [
-          {
-            ID: "DeleteIncompleteMultipartUploads",
-            Status: "Enabled",
-            AbortIncompleteMultipartUpload: {
-              DaysAfterInitiation: 1,
-            },
-            Filter: {},
-          },
-          {
-            ID: "DeleteOldTempFiles",
-            Status: "Enabled",
-            Expiration: {
-              Days: 7,
-            },
-            Filter: {
-              Prefix: "temp/",
-            },
-          },
-        ],
-      };
-
-      const command = new PutBucketLifecycleConfigurationCommand({
-        Bucket: BUCKET_NAME,
-        LifecycleConfiguration: lifecycleConfiguration,
-      });
-
-      await s3Client.send(command);
-      return true;
-    } catch (error) {
-      throw new Error(`Failed to setup lifecycle: ${error.message}`);
     }
   },
 };
