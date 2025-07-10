@@ -1,3 +1,4 @@
+// utils/s3Utils.js - FIXED with signature version v4
 const {
   S3Client,
   PutObjectCommand,
@@ -16,13 +17,16 @@ const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { createPresignedPost } = require("@aws-sdk/s3-presigned-post");
 const { v4: uuidv4 } = require("uuid");
 
-// Configure S3 Client với retry và timeout
+// 🔥 FIXED: Configure S3 Client với signature version v4
 const s3Client = new S3Client({
   region: process.env.AWS_REGION || "us-east-1",
   credentials: {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   },
+  signatureVersion: 'v4',
+  useAccelerateEndpoint: false,
+  forcePathStyle: false,
   maxAttempts: 3,
   retryMode: "adaptive",
   requestTimeout: 60000, // 60 seconds
@@ -96,43 +100,55 @@ const s3Utils = {
     };
   },
 
-  // Generate presigned URL for upload (PUT method)
+  // 🔥 FIXED: Generate presigned URL for upload (PUT method) with proper content-type handling
   generatePresignedUrl: async (key, fileType, expiresIn = 3600) => {
     try {
+      console.log(`🔗 Generating presigned URL for ${key} with type ${fileType}`);
+
       const command = new PutObjectCommand({
         Bucket: BUCKET_NAME,
         Key: key,
         ContentType: fileType,
         ServerSideEncryption: "AES256",
         Metadata: {
-          'uploaded-by': 'screen-capture-tool',
+          'uploaded-by': 'cellebrite-capture-tool',
           'upload-timestamp': new Date().toISOString()
         }
       });
 
-      const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn });
+      const uploadUrl = await getSignedUrl(s3Client, command, { 
+        expiresIn,
+        signableHeaders: new Set(['content-type']),
+      });
+
       const fileUrl = `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
+
+      console.log(`✅ Presigned URL generated successfully for ${key}`);
+      console.log(`🔗 Upload URL: ${uploadUrl.substring(0, 100)}...`);
+      console.log(`📁 File URL: ${fileUrl}`);
 
       return {
         uploadUrl,
         fileUrl,
         method: "PUT",
         headers: {
-          'Content-Type': fileType
+          'Content-Type': fileType // 🔥 ENSURE này match với PUT request
         }
       };
     } catch (error) {
-      console.error('Error generating presigned URL:', error);
+      console.error('❌ Error generating presigned URL:', error);
       throw new Error(`Failed to generate presigned URL: ${error.message}`);
     }
   },
 
-  // Generate presigned POST URL (alternative method)
+  // 🔥 IMPROVED: Generate presigned POST URL with better error handling
   generatePresignedPost: async (key, fileType, fileSize, expiresIn = 3600) => {
     try {
+      console.log(`🔗 Generating presigned POST for ${key} with type ${fileType}`);
+
       const conditions = [
         ["content-length-range", 1024, MAX_FILE_SIZE],
-        ["starts-with", "$Content-Type", fileType.split("/")[0] + "/"],
+        ["eq", "$Content-Type", fileType], // 🔥 FIXED: Exact match instead of starts-with
         ["eq", "$key", key]
       ];
 
@@ -155,6 +171,8 @@ const s3Utils = {
 
       const fileUrl = `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
 
+      console.log(`✅ Presigned POST generated successfully for ${key}`);
+
       return {
         uploadUrl: url,
         fileUrl,
@@ -162,12 +180,12 @@ const s3Utils = {
         method: "POST",
       };
     } catch (error) {
-      console.error('Error generating presigned POST:', error);
+      console.error('❌ Error generating presigned POST:', error);
       throw new Error(`Failed to generate presigned POST: ${error.message}`);
     }
   },
 
-  // Delete file from S3
+  // Rest of the methods remain the same...
   deleteFile: async (key) => {
     try {
       const command = new DeleteObjectCommand({
@@ -184,7 +202,6 @@ const s3Utils = {
     }
   },
 
-  // Delete multiple files from S3
   deleteMultipleFiles: async (keys) => {
     try {
       const deletePromises = keys.map(key => s3Utils.deleteFile(key));
@@ -196,7 +213,6 @@ const s3Utils = {
     }
   },
 
-  // Check if file exists in S3
   fileExists: async (key) => {
     try {
       const command = new HeadObjectCommand({
@@ -218,7 +234,6 @@ const s3Utils = {
     }
   },
 
-  // Get file metadata from S3
   getFileMetadata: async (key) => {
     try {
       const command = new HeadObjectCommand({
@@ -243,7 +258,6 @@ const s3Utils = {
     }
   },
 
-  // Generate temporary download URL
   generateDownloadUrl: async (key, expiresIn = 3600, filename = null) => {
     try {
       const params = {
@@ -251,7 +265,6 @@ const s3Utils = {
         Key: key,
       };
 
-      // Add filename for download
       if (filename) {
         params.ResponseContentDisposition = `attachment; filename="${filename}"`;
       }
@@ -264,7 +277,6 @@ const s3Utils = {
     }
   },
 
-  // List files for a case
   listCaseFiles: async (caseId, captureType = "", maxKeys = 1000) => {
     try {
       const prefix = captureType 
@@ -292,7 +304,6 @@ const s3Utils = {
     }
   },
 
-  // Get bucket information
   getBucketInfo: async () => {
     try {
       const command = new HeadBucketCommand({
@@ -318,14 +329,12 @@ const s3Utils = {
     }
   },
 
-  // Create bucket (for setup)
   createBucket: async () => {
     try {
       const params = {
         Bucket: BUCKET_NAME,
       };
 
-      // Add LocationConstraint for regions other than us-east-1
       if (process.env.AWS_REGION !== "us-east-1") {
         params.CreateBucketConfiguration = {
           LocationConstraint: process.env.AWS_REGION,
@@ -336,10 +345,7 @@ const s3Utils = {
       await s3Client.send(command);
       
       console.log(`Bucket ${BUCKET_NAME} created successfully`);
-      
-      // Wait a bit for bucket to be available
       await new Promise(resolve => setTimeout(resolve, 2000));
-      
       return true;
     } catch (error) {
       if (error.name === 'BucketAlreadyExists' || error.name === 'BucketAlreadyOwnedByYou') {
@@ -351,7 +357,7 @@ const s3Utils = {
     }
   },
 
-  // Setup CORS configuration
+  // 🔥 IMPROVED: Better CORS setup for extension compatibility
   setupCors: async () => {
     try {
       const corsConfiguration = {
@@ -361,13 +367,9 @@ const s3Utils = {
             AllowedHeaders: ["*"],
             AllowedMethods: ["GET", "PUT", "POST", "DELETE", "HEAD"],
             AllowedOrigins: [
-              "chrome-extension://*",
-              "moz-extension://*",
-              "http://localhost:*",
-              "https://localhost:*",
-              ...(process.env.CORS_ORIGINS?.split(',') || [])
+              "*", // 🔥 Allow all origins for presigned URLs
             ],
-            ExposeHeaders: ["ETag", "x-amz-meta-*"],
+            ExposeHeaders: ["ETag", "x-amz-meta-*", "x-amz-version-id"],
             MaxAgeSeconds: 3600,
           },
         ],
@@ -379,15 +381,14 @@ const s3Utils = {
       });
 
       await s3Client.send(command);
-      console.log('CORS configuration applied successfully');
+      console.log('✅ CORS configuration applied successfully');
       return true;
     } catch (error) {
-      console.error('Error setting up CORS:', error);
+      console.error('❌ Error setting up CORS:', error);
       throw new Error(`Failed to setup CORS: ${error.message}`);
     }
   },
 
-  // Setup lifecycle configuration
   setupLifecycle: async () => {
     try {
       const lifecycleConfiguration = {
@@ -439,7 +440,6 @@ const s3Utils = {
     }
   },
 
-  // Setup bucket versioning
   setupVersioning: async () => {
     try {
       const command = new PutBucketVersioningCommand({
@@ -458,7 +458,6 @@ const s3Utils = {
     }
   },
 
-  // Setup public access block (security)
   setupPublicAccessBlock: async () => {
     try {
       const command = new PutPublicAccessBlockCommand({
@@ -480,13 +479,11 @@ const s3Utils = {
     }
   },
 
-  // Calculate storage costs (estimation)
   calculateStorageCosts: (fileSizeBytes, storageClass = 'STANDARD') => {
     const fileSizeGB = fileSizeBytes / (1024 * 1024 * 1024);
     
-    // AWS S3 pricing (approximate, varies by region)
     const pricing = {
-      STANDARD: 0.023, // per GB per month
+      STANDARD: 0.023,
       STANDARD_IA: 0.0125,
       GLACIER: 0.004,
       DEEP_ARCHIVE: 0.00099
@@ -500,7 +497,6 @@ const s3Utils = {
     };
   },
 
-  // Get bucket size and object count
   getBucketStats: async () => {
     try {
       let totalSize = 0;

@@ -65,6 +65,7 @@ const schemas = {
     captureType: Joi.string().valid("screenshot", "video").required(),
     fileSize: Joi.number().positive().optional(),
     userId: Joi.string().optional(),
+    uploadMethod: Joi.string().valid("PUT", "POST").default("PUT"),
   }),
 
   caseQuery: Joi.object({
