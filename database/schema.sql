@@ -1,4 +1,4 @@
--- database/schema.sql - PostgreSQL Schema
+-- database/schema.sql - PostgreSQL Schema with Description and Source URL
 -- Create database schema for Screen Capture Tool
 
 -- Extensions
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS cases (
     metadata JSONB DEFAULT '{}'::jsonb
 );
 
--- Files table
+-- Files table - UPDATED with description and source_url
 CREATE TABLE IF NOT EXISTS files (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     case_id VARCHAR(20) REFERENCES cases(id) ON DELETE CASCADE,
@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS files (
     file_type VARCHAR(100) NOT NULL,
     file_size BIGINT NOT NULL,
     capture_type VARCHAR(20) CHECK (capture_type IN ('screenshot', 'video')),
+    description TEXT, -- Description of the screenshot/video
+    source_url TEXT, -- URL of the page that was captured
     uploaded_by UUID REFERENCES users(id),
     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed')),
     checksum VARCHAR(64),
@@ -85,6 +87,8 @@ CREATE INDEX IF NOT EXISTS idx_cases_created_at ON cases(created_at);
 CREATE INDEX IF NOT EXISTS idx_files_case_id ON files(case_id);
 CREATE INDEX IF NOT EXISTS idx_files_uploaded_by ON files(uploaded_by);
 CREATE INDEX IF NOT EXISTS idx_files_created_at ON files(created_at);
+CREATE INDEX IF NOT EXISTS idx_files_source_url ON files(source_url);
+CREATE INDEX IF NOT EXISTS idx_files_description ON files(description) WHERE description IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);

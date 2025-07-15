@@ -13,6 +13,8 @@ const uploadController = {
         captureType,
         fileSize,
         uploadMethod = "PUT",
+        description, // ✅ NEW: Add description
+        sourceUrl    // ✅ NEW: Add source URL
       } = req.body;
       const userId = req.user.id;
 
@@ -56,7 +58,7 @@ const uploadController = {
         result = await s3Utils.generatePresignedUrl(s3Key, fileType);
       }
 
-      // Create file metadata record
+      // Create file metadata record - ✅ UPDATED with description and source_url
       const fileMetadata = {
         id: uuidv4(),
         fileName: fileName,
@@ -67,6 +69,8 @@ const uploadController = {
         fileSize: fileSize || 0,
         caseId,
         captureType,
+        description: description || null, // ✅ NEW: Store description
+        sourceUrl: sourceUrl || null,    // ✅ NEW: Store source URL
         uploadedBy: req.user.username,
         status: "pending",
         createdAt: new Date().toISOString(),
@@ -91,6 +95,8 @@ const uploadController = {
           caseId,
           captureType,
           userId: req.user.id,
+          description, // ✅ NEW: Include in response
+          sourceUrl,   // ✅ NEW: Include in response
         },
       });
     } catch (error) {
@@ -102,7 +108,15 @@ const uploadController = {
   // Confirm successful upload
   confirmUpload: async (req, res, next) => {
     try {
-      const { fileId, fileKey, actualFileSize, checksum, uploadMethod } = req.body;
+      const { 
+        fileId, 
+        fileKey, 
+        actualFileSize, 
+        checksum, 
+        uploadMethod,
+        description, // ✅ NEW: Allow updating description during confirm
+        sourceUrl    // ✅ NEW: Allow updating source URL during confirm
+      } = req.body;
 
       if (!fileId && !fileKey) {
         return res.status(400).json({
@@ -138,12 +152,14 @@ const uploadController = {
       // Get actual file metadata from S3
       const s3Metadata = await s3Utils.getFileMetadata(file.fileKey);
 
-      // Update file metadata
+      // ✅ UPDATED: Update file metadata with description and source URL
       files[fileIndex] = {
         ...file,
         status: "completed",
         fileSize: actualFileSize || s3Metadata.contentLength,
         checksum: checksum,
+        description: description !== undefined ? description : file.description, // ✅ NEW
+        sourceUrl: sourceUrl !== undefined ? sourceUrl : file.sourceUrl,       // ✅ NEW
         uploadedAt: new Date().toISOString(),
         uploadMethod: uploadMethod || file.uploadMethod,
         s3Metadata: {
@@ -188,6 +204,50 @@ const uploadController = {
       });
     } catch (error) {
       console.error('Error confirming upload:', error);
+      next(error);
+    }
+  },
+
+  // ✅ NEW: Update file metadata (description and source URL)
+  updateFileMetadata: async (req, res, next) => {
+    try {
+      const { fileKey } = req.params;
+      const { description, sourceUrl } = req.body;
+
+      // Find file metadata
+      const fileIndex = files.findIndex((f) => f.fileKey === fileKey);
+      if (fileIndex === -1) {
+        return res.status(404).json({
+          error: "File not found",
+          code: "FILE_NOT_FOUND",
+        });
+      }
+
+      const file = files[fileIndex];
+
+      // Check permissions
+      if (file.uploadedBy !== req.user.username && req.user.role !== "admin") {
+        return res.status(403).json({
+          error: "Insufficient permissions to update this file",
+          code: "INSUFFICIENT_PERMISSIONS",
+        });
+      }
+
+      // Update metadata
+      files[fileIndex] = {
+        ...file,
+        description: description !== undefined ? description : file.description,
+        sourceUrl: sourceUrl !== undefined ? sourceUrl : file.sourceUrl,
+        updatedAt: new Date().toISOString(),
+      };
+
+      res.json({
+        success: true,
+        file: files[fileIndex],
+        message: "File metadata updated successfully",
+      });
+    } catch (error) {
+      console.error('Error updating file metadata:', error);
       next(error);
     }
   },
@@ -264,6 +324,8 @@ const uploadController = {
         deletedFile: {
           fileKey: file.fileKey,
           fileName: file.fileName,
+          description: file.description,
+          sourceUrl: file.sourceUrl,
         },
       });
     } catch (error) {
@@ -272,94 +334,18 @@ const uploadController = {
     }
   },
 
-  // Bulk delete files
-  bulkDeleteFiles: async (req, res, next) => {
-    try {
-      const { fileKeys, caseId } = req.body;
-      const deletedFiles = [];
-      const errors = [];
-
-      for (const fileKey of fileKeys) {
-        try {
-          const fileIndex = files.findIndex((f) => f.fileKey === fileKey);
-          if (fileIndex === -1) {
-            errors.push({ fileKey, error: "File not found" });
-            continue;
-          }
-
-          const file = files[fileIndex];
-
-          // Check permissions
-          if (file.uploadedBy !== req.user.username && req.user.role !== "admin") {
-            errors.push({ fileKey, error: "Insufficient permissions" });
-            continue;
-          }
-
-          // Delete from S3
-          await s3Utils.deleteFile(fileKey);
-          
-          // Remove from metadata
-          files.splice(fileIndex, 1);
-          deletedFiles.push({
-            fileKey: file.fileKey,
-            fileName: file.fileName,
-          });
-
-          // Update case metadata
-          if (caseId || file.caseId) {
-            const targetCaseId = caseId || file.caseId;
-            const caseIndex = cases.findIndex((c) => c.id === targetCaseId);
-            if (caseIndex !== -1) {
-              const case_ = cases[caseIndex];
-              const isScreenshot = file.captureType === "screenshot";
-
-              cases[caseIndex] = {
-                ...case_,
-                metadata: {
-                  ...case_.metadata,
-                  totalScreenshots: isScreenshot
-                    ? Math.max(0, (case_.metadata.totalScreenshots || 0) - 1)
-                    : case_.metadata.totalScreenshots || 0,
-                  totalVideos: !isScreenshot
-                    ? Math.max(0, (case_.metadata.totalVideos || 0) - 1)
-                    : case_.metadata.totalVideos || 0,
-                  totalFileSize: Math.max(
-                    0,
-                    (case_.metadata.totalFileSize || 0) - file.fileSize
-                  ),
-                  lastActivity: new Date().toISOString(),
-                },
-                updatedAt: new Date().toISOString(),
-              };
-            }
-          }
-        } catch (error) {
-          errors.push({ fileKey, error: error.message });
-        }
-      }
-
-      res.json({
-        success: true,
-        message: `Bulk delete completed. ${deletedFiles.length} files deleted, ${errors.length} errors`,
-        deletedFiles,
-        errors,
-        stats: {
-          total: fileKeys.length,
-          deleted: deletedFiles.length,
-          failed: errors.length,
-        },
-      });
-    } catch (error) {
-      console.error('Error bulk deleting files:', error);
-      next(error);
-    }
-  },
-
-  // Get files for a case
+  // ✅ UPDATED: Get files for a case with enhanced search
   getCaseFiles: async (req, res, next) => {
     try {
       const { caseId } = req.params;
-      const { captureType, page = 1, limit = 20, sortBy = 'date', sortOrder = 'desc' } = req.query;
+      const { 
+        captureType, 
+        page = 1, 
+        limit = 20, 
+        sortBy = 'date', 
+        sortOrder = 'desc',
+        search // ✅ NEW: Add search parameter
+      } = req.query;
 
       // Check if case exists
       const case_ = cases.find((c) => c.id === caseId);
@@ -377,6 +363,16 @@ const uploadController = {
 
       if (captureType) {
         caseFiles = caseFiles.filter((f) => f.captureType === captureType);
+      }
+
+      // ✅ NEW: Search functionality
+      if (search) {
+        const searchLower = search.toLowerCase();
+        caseFiles = caseFiles.filter((f) => 
+          (f.fileName && f.fileName.toLowerCase().includes(searchLower)) ||
+          (f.description && f.description.toLowerCase().includes(searchLower)) ||
+          (f.sourceUrl && f.sourceUrl.toLowerCase().includes(searchLower))
+        );
       }
 
       // Sort files
@@ -446,15 +442,17 @@ const uploadController = {
         },
         summary: {
           totalFiles: caseFiles.length,
-          screenshots: caseFiles.filter((f) => f.captureType === "screenshot")
-            .length,
+          screenshots: caseFiles.filter((f) => f.captureType === "screenshot").length,
           videos: caseFiles.filter((f) => f.captureType === "video").length,
           totalSize: caseFiles.reduce((sum, f) => sum + f.fileSize, 0),
+          filesWithDescription: caseFiles.filter((f) => f.description && f.description.trim()).length,
+          filesWithSourceUrl: caseFiles.filter((f) => f.sourceUrl && f.sourceUrl.trim()).length,
         },
         sorting: {
           sortBy,
           sortOrder,
         },
+        search: search || null,
       });
     } catch (error) {
       console.error('Error getting case files:', error);
@@ -462,7 +460,137 @@ const uploadController = {
     }
   },
 
-  // Get file download URL
+  // ✅ NEW: Search files across all cases
+  searchFiles: async (req, res, next) => {
+    try {
+      const { 
+        query: searchQuery,
+        captureType,
+        caseId,
+        page = 1,
+        limit = 20 
+      } = req.query;
+
+      if (!searchQuery || searchQuery.trim().length < 2) {
+        return res.status(400).json({
+          error: "Search query must be at least 2 characters",
+          code: "INVALID_SEARCH_QUERY",
+        });
+      }
+
+      let searchResults = files.filter((f) => f.status === "completed");
+
+      // Apply search
+      const searchLower = searchQuery.toLowerCase();
+      searchResults = searchResults.filter((f) => 
+        (f.fileName && f.fileName.toLowerCase().includes(searchLower)) ||
+        (f.description && f.description.toLowerCase().includes(searchLower)) ||
+        (f.sourceUrl && f.sourceUrl.toLowerCase().includes(searchLower)) ||
+        (f.originalName && f.originalName.toLowerCase().includes(searchLower))
+      );
+
+      // Apply filters
+      if (captureType) {
+        searchResults = searchResults.filter((f) => f.captureType === captureType);
+      }
+
+      if (caseId) {
+        searchResults = searchResults.filter((f) => f.caseId === caseId);
+      }
+
+      // Sort by relevance (files with matches in description/filename first)
+      searchResults.sort((a, b) => {
+        const aScore = getRelevanceScore(a, searchLower);
+        const bScore = getRelevanceScore(b, searchLower);
+        return bScore - aScore;
+      });
+
+      // Pagination
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
+      const paginatedResults = searchResults.slice(startIndex, endIndex);
+
+      res.json({
+        results: paginatedResults,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: searchResults.length,
+          totalPages: Math.ceil(searchResults.length / limit),
+          hasNext: endIndex < searchResults.length,
+          hasPrev: page > 1,
+        },
+        query: searchQuery,
+        summary: {
+          totalMatches: searchResults.length,
+          screenshots: searchResults.filter((f) => f.captureType === "screenshot").length,
+          videos: searchResults.filter((f) => f.captureType === "video").length,
+        },
+      });
+    } catch (error) {
+      console.error('Error searching files:', error);
+      next(error);
+    }
+  },
+
+  // ✅ NEW: Get files by source URL
+  getFilesBySourceUrl: async (req, res, next) => {
+    try {
+      const { sourceUrl } = req.params;
+      const { caseId, page = 1, limit = 20 } = req.query;
+
+      if (!sourceUrl) {
+        return res.status(400).json({
+          error: "Source URL is required",
+          code: "MISSING_SOURCE_URL",
+        });
+      }
+
+      let urlFiles = files.filter((f) => 
+        f.status === "completed" && 
+        f.sourceUrl && 
+        f.sourceUrl.includes(decodeURIComponent(sourceUrl))
+      );
+
+      if (caseId) {
+        urlFiles = urlFiles.filter((f) => f.caseId === caseId);
+      }
+
+      // Sort by upload date (newest first)
+      urlFiles.sort((a, b) => 
+        new Date(b.uploadedAt || b.createdAt) - new Date(a.uploadedAt || a.createdAt)
+      );
+
+      // Pagination
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
+      const paginatedFiles = urlFiles.slice(startIndex, endIndex);
+
+      res.json({
+        files: paginatedFiles,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: urlFiles.length,
+          totalPages: Math.ceil(urlFiles.length / limit),
+          hasNext: endIndex < urlFiles.length,
+          hasPrev: page > 1,
+        },
+        sourceUrl: decodeURIComponent(sourceUrl),
+        summary: {
+          totalFiles: urlFiles.length,
+          screenshots: urlFiles.filter((f) => f.captureType === "screenshot").length,
+          videos: urlFiles.filter((f) => f.captureType === "video").length,
+          uniqueCases: [...new Set(urlFiles.map(f => f.caseId))].length,
+        },
+      });
+    } catch (error) {
+      console.error('Error getting files by source URL:', error);
+      next(error);
+    }
+  },
+
+  // Rest of existing methods...
   getDownloadUrl: async (req, res, next) => {
     try {
       const { fileKey } = req.params;
@@ -488,6 +616,8 @@ const uploadController = {
         downloadUrl,
         fileName: file.fileName,
         originalName: file.originalName,
+        description: file.description, // ✅ NEW: Include description
+        sourceUrl: file.sourceUrl,     // ✅ NEW: Include source URL
         fileSize: file.fileSize,
         fileType: file.fileType,
         expiresIn: parseInt(expiresIn),
@@ -498,59 +628,6 @@ const uploadController = {
     } catch (error) {
       console.error('Error getting download URL:', error);
       next(error);
-    }
-  },
-
-  // Get file details
-  getFileDetails: async (req, res, next) => {
-    try {
-      const { fileKey } = req.params;
-
-      // Find file metadata
-      const file = files.find((f) => f.fileKey === fileKey);
-      if (!file) {
-        return res.status(404).json({
-          error: "File not found",
-          code: "FILE_NOT_FOUND",
-        });
-      }
-
-      // Get S3 metadata
-      const s3Metadata = await s3Utils.getFileMetadata(fileKey);
-
-      res.json({
-        ...file,
-        s3Metadata,
-        storageStats: s3Utils.calculateStorageCosts(file.fileSize),
-      });
-    } catch (error) {
-      console.error('Error getting file details:', error);
-      next(error);
-    }
-  },
-
-  // Check file existence
-  checkFileExists: async (req, res, next) => {
-    try {
-      const { fileKey } = req.params;
-
-      const exists = await s3Utils.fileExists(fileKey);
-      
-      if (exists) {
-        const metadata = await s3Utils.getFileMetadata(fileKey);
-        res.set({
-          'Content-Length': metadata.contentLength,
-          'Content-Type': metadata.contentType,
-          'Last-Modified': metadata.lastModified,
-          'ETag': metadata.etag,
-        });
-        res.status(200).end();
-      } else {
-        res.status(404).end();
-      }
-    } catch (error) {
-      console.error('Error checking file existence:', error);
-      res.status(500).end();
     }
   },
 
@@ -586,6 +663,15 @@ const uploadController = {
           ).length,
           video: filteredFiles.filter((f) => f.captureType === "video").length,
         },
+        // ✅ NEW: Add metadata stats
+        withMetadata: {
+          description: filteredFiles.filter((f) => f.description && f.description.trim()).length,
+          sourceUrl: filteredFiles.filter((f) => f.sourceUrl && f.sourceUrl.trim()).length,
+          both: filteredFiles.filter((f) => 
+            f.description && f.description.trim() && 
+            f.sourceUrl && f.sourceUrl.trim()
+          ).length,
+        },
         byCaseId: {},
         byUser: {},
         recentUploads: filteredFiles
@@ -599,6 +685,8 @@ const uploadController = {
             fileSize: f.fileSize,
             uploadedBy: f.uploadedBy,
             uploadedAt: f.uploadedAt,
+            description: f.description,
+            sourceUrl: f.sourceUrl,
           })),
         uploadsByDay: getUploadsByDay(filteredFiles, parseInt(days)),
       };
@@ -621,6 +709,8 @@ const uploadController = {
           largestFile: filteredFiles.reduce((max, f) => f.fileSize > max.fileSize ? f : max, { fileSize: 0 }),
           storageClasses: {},
           uploadMethods: {},
+          // ✅ NEW: Top source URLs
+          topSourceUrls: getTopSourceUrls(filteredFiles, 10),
         };
 
         // Group by storage class and upload method
@@ -642,7 +732,143 @@ const uploadController = {
     }
   },
 
-  // Get storage costs estimation
+  // ✅ UPDATED: Rest of methods remain the same but should include new fields in responses
+  getFileDetails: async (req, res, next) => {
+    try {
+      const { fileKey } = req.params;
+
+      // Find file metadata
+      const file = files.find((f) => f.fileKey === fileKey);
+      if (!file) {
+        return res.status(404).json({
+          error: "File not found",
+          code: "FILE_NOT_FOUND",
+        });
+      }
+
+      // Get S3 metadata
+      const s3Metadata = await s3Utils.getFileMetadata(fileKey);
+
+      res.json({
+        ...file,
+        s3Metadata,
+        storageStats: s3Utils.calculateStorageCosts(file.fileSize),
+      });
+    } catch (error) {
+      console.error('Error getting file details:', error);
+      next(error);
+    }
+  },
+
+  // Other existing methods remain the same...
+  bulkDeleteFiles: async (req, res, next) => {
+    try {
+      const { fileKeys, caseId } = req.body;
+      const deletedFiles = [];
+      const errors = [];
+
+      for (const fileKey of fileKeys) {
+        try {
+          const fileIndex = files.findIndex((f) => f.fileKey === fileKey);
+          if (fileIndex === -1) {
+            errors.push({ fileKey, error: "File not found" });
+            continue;
+          }
+
+          const file = files[fileIndex];
+
+          // Check permissions
+          if (file.uploadedBy !== req.user.username && req.user.role !== "admin") {
+            errors.push({ fileKey, error: "Insufficient permissions" });
+            continue;
+          }
+
+          // Delete from S3
+          await s3Utils.deleteFile(fileKey);
+          
+          // Remove from metadata
+          files.splice(fileIndex, 1);
+          deletedFiles.push({
+            fileKey: file.fileKey,
+            fileName: file.fileName,
+            description: file.description,
+            sourceUrl: file.sourceUrl,
+          });
+
+          // Update case metadata
+          if (caseId || file.caseId) {
+            const targetCaseId = caseId || file.caseId;
+            const caseIndex = cases.findIndex((c) => c.id === targetCaseId);
+            if (caseIndex !== -1) {
+              const case_ = cases[caseIndex];
+              const isScreenshot = file.captureType === "screenshot";
+
+              cases[caseIndex] = {
+                ...case_,
+                metadata: {
+                  ...case_.metadata,
+                  totalScreenshots: isScreenshot
+                    ? Math.max(0, (case_.metadata.totalScreenshots || 0) - 1)
+                    : case_.metadata.totalScreenshots || 0,
+                  totalVideos: !isScreenshot
+                    ? Math.max(0, (case_.metadata.totalVideos || 0) - 1)
+                    : case_.metadata.totalVideos || 0,
+                  totalFileSize: Math.max(
+                    0,
+                    (case_.metadata.totalFileSize || 0) - file.fileSize
+                  ),
+                  lastActivity: new Date().toISOString(),
+                },
+                updatedAt: new Date().toISOString(),
+              };
+            }
+          }
+        } catch (error) {
+          errors.push({ fileKey, error: error.message });
+        }
+      }
+
+      res.json({
+        success: true,
+        message: `Bulk delete completed. ${deletedFiles.length} files deleted, ${errors.length} errors`,
+        deletedFiles,
+        errors,
+        stats: {
+          total: fileKeys.length,
+          deleted: deletedFiles.length,
+          failed: errors.length,
+        },
+      });
+    } catch (error) {
+      console.error('Error bulk deleting files:', error);
+      next(error);
+    }
+  },
+
+  checkFileExists: async (req, res, next) => {
+    try {
+      const { fileKey } = req.params;
+
+      const exists = await s3Utils.fileExists(fileKey);
+      
+      if (exists) {
+        const metadata = await s3Utils.getFileMetadata(fileKey);
+        res.set({
+          'Content-Length': metadata.contentLength,
+          'Content-Type': metadata.contentType,
+          'Last-Modified': metadata.lastModified,
+          'ETag': metadata.etag,
+        });
+        res.status(200).end();
+      } else {
+        res.status(404).end();
+      }
+    } catch (error) {
+      console.error('Error checking file existence:', error);
+      res.status(500).end();
+    }
+  },
+
   getStorageCosts: async (req, res, next) => {
     try {
       const { caseId, storageClass = 'STANDARD' } = req.query;
@@ -672,7 +898,6 @@ const uploadController = {
     }
   },
 
-  // Change storage class
   changeStorageClass: async (req, res, next) => {
     try {
       const { fileKey } = req.params;
@@ -725,6 +950,56 @@ function getUploadsByDay(files, days) {
   });
 
   return uploadsByDay;
+}
+
+// ✅ NEW: Helper function to calculate relevance score for search
+function getRelevanceScore(file, searchQuery) {
+  let score = 0;
+  const query = searchQuery.toLowerCase();
+
+  // Higher score for matches in filename
+  if (file.fileName && file.fileName.toLowerCase().includes(query)) {
+    score += 10;
+  }
+
+  // Medium score for matches in description
+  if (file.description && file.description.toLowerCase().includes(query)) {
+    score += 7;
+  }
+
+  // Lower score for matches in source URL
+  if (file.sourceUrl && file.sourceUrl.toLowerCase().includes(query)) {
+    score += 5;
+  }
+
+  // Bonus for exact matches
+  if (file.fileName && file.fileName.toLowerCase() === query) {
+    score += 20;
+  }
+
+  return score;
+}
+
+// ✅ NEW: Helper function to get top source URLs
+function getTopSourceUrls(files, limit = 10) {
+  const urlCounts = {};
+
+  files.forEach((file) => {
+    if (file.sourceUrl) {
+      try {
+        const url = new URL(file.sourceUrl);
+        const domain = url.hostname;
+        urlCounts[domain] = (urlCounts[domain] || 0) + 1;
+      } catch (error) {
+        // Invalid URL, skip
+      }
+    }
+  });
+
+  return Object.entries(urlCounts)
+    .sort(([,a], [,b]) => b - a)
+    .slice(0, limit)
+    .map(([domain, count]) => ({ domain, count }));
 }
 
 // Helper function to generate storage recommendations
