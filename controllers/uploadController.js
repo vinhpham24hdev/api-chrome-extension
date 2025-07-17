@@ -22,14 +22,34 @@ const uploadController = {
       } = req.body;
       const userId = req.user.id;
 
+      // Clean file type by removing codec parameters for validation
+      const cleanFileType = fileType.split(';')[0].trim();
+      
       // Enhanced validation with video support
       const validation = s3Utils.validateFileParams(
         fileName,
-        fileType,
+        cleanFileType,
         fileSize,
         captureType,
         videoMetadata
       );
+      
+      if (!validation.isValid) {
+        return res.status(400).json({
+          error: "File validation failed",
+          details: validation.errors,
+          code: "VALIDATION_ERROR",
+        });
+      }
+
+      // Extract codec from original fileType if present
+      const codecMatch = fileType.match(/codecs=([^;,]+)/i);
+      if (codecMatch && captureType === 'video') {
+        const detectedCodec = codecMatch[1].replace(/"/g, '').toLowerCase();
+        if (!videoMetadata.codec) {
+          videoMetadata.codec = detectedCodec;
+        }
+      }
       
       if (!validation.isValid) {
         return res.status(400).json({
@@ -64,7 +84,8 @@ const uploadController = {
         originalName: fileName,
         fileKey: s3Key,
         fileUrl: `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
-        fileType,
+        fileType: cleanFileType, // Use clean file type without codec parameters
+        originalFileType: fileType, // Keep original for reference
         fileSize: fileSize || 0,
         caseId,
         captureType,
@@ -105,7 +126,7 @@ const uploadController = {
       } else if (uploadMethod === "POST") {
         result = await s3Utils.generatePresignedPost(
           s3Key, 
-          fileType, 
+          cleanFileType, // Use clean file type
           fileSize, 
           3600, 
           videoMetadata
@@ -113,7 +134,7 @@ const uploadController = {
       } else {
         result = await s3Utils.generatePresignedUrl(
           s3Key, 
-          fileType, 
+          cleanFileType, // Use clean file type
           captureType === 'video' ? 7200 : 3600, 
           videoMetadata
         );
