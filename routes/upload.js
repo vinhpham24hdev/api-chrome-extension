@@ -1,5 +1,7 @@
 // routes/upload.js - Enhanced for Video Recording Support
 const express = require("express");
+const Joi = require("joi");
+
 const uploadController = require("../controllers/uploadController");
 const { authenticateToken, authorizeRole } = require("../middleware/auth");
 const {
@@ -7,7 +9,6 @@ const {
   validateQuery,
   schemas,
 } = require("../middleware/validation");
-const Joi = require("joi");
 
 const router = express.Router();
 
@@ -125,11 +126,6 @@ router.post(
   uploadController.confirmUpload
 );
 
-// ✅ NEW: Get video metadata
-router.get(
-  "/video/:fileKey(*)/metadata",
-  uploadController.getVideoMetadata
-);
 
 // ✅ NEW: Update file metadata (description and source URL)
 router.patch(
@@ -164,18 +160,6 @@ router.delete(
     })
   ),
   uploadController.deleteFile
-);
-
-// Bulk delete files
-router.delete(
-  "/files/bulk",
-  validateBody(
-    Joi.object({
-      fileKeys: Joi.array().items(Joi.string()).min(1).required(),
-      caseId: Joi.string().optional(),
-    })
-  ),
-  uploadController.bulkDeleteFiles
 );
 
 // ✅ ENHANCED: Get files for a case with video filtering
@@ -290,22 +274,6 @@ router.get(
   uploadController.getUploadStats
 );
 
-// ✅ NEW: Get video-specific statistics
-router.get(
-  "/stats/video",
-  validateQuery(
-    Joi.object({
-      caseId: Joi.string().optional(),
-      days: Joi.number().integer().min(1).max(365).default(30),
-      groupBy: Joi.string().valid('day', 'week', 'month').default('day'),
-      metrics: Joi.array().items(
-        Joi.string().valid('duration', 'size', 'count', 'resolution', 'codec')
-      ).default(['duration', 'size', 'count'])
-    })
-  ),
-  uploadController.getVideoStats
-);
-
 // Get storage costs estimation
 router.get(
   "/costs",
@@ -336,118 +304,6 @@ router.patch(
     })
   ),
   uploadController.changeStorageClass
-);
-
-// ✅ NEW: Video processing endpoints
-
-// Request video thumbnail generation
-router.post(
-  "/video/:fileKey(*)/thumbnail",
-  validateBody(
-    Joi.object({
-      timestamp: Joi.number().min(0).optional().default(0), // Timestamp in seconds
-      width: Joi.number().integer().min(100).max(1920).optional().default(320),
-      height: Joi.number().integer().min(100).max(1080).optional().default(240),
-      format: Joi.string().valid('jpg', 'png', 'webp').optional().default('jpg')
-    })
-  ),
-  uploadController.generateVideoThumbnail
-);
-
-// Request video compression
-router.post(
-  "/video/:fileKey(*)/compress",
-  validateBody(
-    Joi.object({
-      quality: Joi.string().valid('low', 'medium', 'high').optional().default('medium'),
-      targetSize: Joi.number().positive().optional(), // Target size in bytes
-      codec: Joi.string().valid('h264', 'h265', 'vp9').optional().default('h264'),
-      removeAudio: Joi.boolean().optional().default(false)
-    })
-  ),
-  uploadController.compressVideo
-);
-
-// Get video processing status
-router.get(
-  "/video/:fileKey(*)/processing/:jobId",
-  uploadController.getVideoProcessingStatus
-);
-
-// ✅ NEW: Batch operations for videos
-
-// Batch generate thumbnails for multiple videos
-router.post(
-  "/videos/batch/thumbnails",
-  validateBody(
-    Joi.object({
-      fileKeys: Joi.array().items(Joi.string()).min(1).max(50).required(),
-      thumbnailConfig: Joi.object({
-        timestamp: Joi.number().min(0).optional().default(0),
-        width: Joi.number().integer().min(100).max(1920).optional().default(320),
-        height: Joi.number().integer().min(100).max(1080).optional().default(240),
-        format: Joi.string().valid('jpg', 'png', 'webp').optional().default('jpg')
-      }).optional()
-    })
-  ),
-  uploadController.batchGenerateThumbnails
-);
-
-// Batch compress videos
-router.post(
-  "/videos/batch/compress",
-  authorizeRole(['admin']), // Only admins can do batch compression
-  validateBody(
-    Joi.object({
-      fileKeys: Joi.array().items(Joi.string()).min(1).max(20).required(),
-      compressionConfig: Joi.object({
-        quality: Joi.string().valid('low', 'medium', 'high').optional().default('medium'),
-        codec: Joi.string().valid('h264', 'h265', 'vp9').optional().default('h264'),
-        removeAudio: Joi.boolean().optional().default(false)
-      }).optional()
-    })
-  ),
-  uploadController.batchCompressVideos
-);
-
-// ✅ NEW: Video analysis endpoints
-
-// Analyze video content (duration, resolution, etc.)
-router.post(
-  "/video/:fileKey(*)/analyze",
-  uploadController.analyzeVideo
-);
-
-// Get video quality metrics
-router.get(
-  "/video/:fileKey(*)/quality",
-  uploadController.getVideoQuality
-);
-
-// ✅ NEW: Video streaming endpoints (for large files)
-
-// Get video streaming URL (for progressive download)
-router.get(
-  "/video/:fileKey(*)/stream",
-  validateQuery(
-    Joi.object({
-      quality: Joi.string().valid('240p', '360p', '480p', '720p', '1080p', 'original').optional().default('original'),
-      format: Joi.string().valid('mp4', 'webm').optional().default('mp4')
-    })
-  ),
-  uploadController.getVideoStreamUrl
-);
-
-// Get video segments for adaptive streaming
-router.get(
-  "/video/:fileKey(*)/segments",
-  validateQuery(
-    Joi.object({
-      segment: Joi.number().integer().min(0).required(),
-      quality: Joi.string().valid('240p', '360p', '480p', '720p', '1080p').optional().default('720p')
-    })
-  ),
-  uploadController.getVideoSegment
 );
 
 module.exports = router;
