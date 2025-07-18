@@ -50,6 +50,10 @@ CREATE TABLE IF NOT EXISTS files (
     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed')),
     checksum VARCHAR(64),
     s3_metadata JSONB DEFAULT '{}'::jsonb,
+    video_metadata JSONB DEFAULT '{}'::jsonb, -- Video-specific metadata
+    session_id VARCHAR(255), -- Session ID for grouping related recordings
+    upload_method VARCHAR(20) DEFAULT 'PUT' CHECK (upload_method IN ('PUT', 'POST', 'MULTIPART')),
+    multipart_upload_id VARCHAR(255), -- For multipart uploads
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     uploaded_at TIMESTAMP WITH TIME ZONE
 );
