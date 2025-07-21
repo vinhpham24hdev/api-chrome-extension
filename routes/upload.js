@@ -101,7 +101,7 @@ router.post(
       actualFileSize: Joi.number().positive().optional(),
       checksum: Joi.string().optional(),
       uploadMethod: Joi.string().valid('PUT', 'POST', 'MULTIPART').default('PUT'),
-      
+      caseId: Joi.string().optional(),
       // Standard fields
       description: Joi.string().max(1000).optional().allow(''),
       sourceUrl: Joi.string().uri().max(2000).optional().allow(''),

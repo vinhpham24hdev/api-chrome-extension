@@ -19,7 +19,7 @@ const uploadController = {
         sourceUrl,
         videoMetadata = {},
         sessionId,
-        useMultipart = false
+        useMultipart = false,
       } = req.body;
       const userId = req.user.id;
 
@@ -31,7 +31,7 @@ const uploadController = {
         captureType,
         videoMetadata
       );
-      
+
       if (!validation.isValid) {
         return res.status(400).json({
           error: "File validation failed",
@@ -71,10 +71,11 @@ const uploadController = {
         description: description || null,
         source_url: sourceUrl || null,
         uploaded_by: req.user.id,
-        video_metadata: captureType === 'video' ? videoMetadata : null,
+        video_metadata: captureType === "video" ? videoMetadata : null,
         session_id: sessionId || null,
-        upload_method: useMultipart || validation.useMultipart ? "MULTIPART" : uploadMethod,
-        multipart_upload_id: null
+        upload_method:
+          useMultipart || validation.useMultipart ? "MULTIPART" : uploadMethod,
+        multipart_upload_id: null,
       };
 
       const createdFile = await File.create(fileMetadata);
@@ -85,13 +86,16 @@ const uploadController = {
       if (useMultipart || validation.useMultipart) {
         // Initialize multipart upload for large files
         const multipartResult = await s3Utils.initializeMultipartUpload(
-          s3Key, 
-          fileType, 
+          s3Key,
+          fileType,
           videoMetadata
         );
-        
+
         // Update file with multipart upload ID
-        await File.updateMultipartUploadId(createdFile.id, multipartResult.uploadId);
+        await File.updateMultipartUploadId(
+          createdFile.id,
+          multipartResult.uploadId
+        );
 
         result = {
           uploadUrl: null, // Will be generated per part
@@ -99,21 +103,21 @@ const uploadController = {
           method: "MULTIPART",
           uploadId: multipartResult.uploadId,
           recommendedChunkSize: validation.recommendedChunkSize,
-          maxParts: 10000
+          maxParts: 10000,
         };
       } else if (uploadMethod === "POST") {
         result = await s3Utils.generatePresignedPost(
-          s3Key, 
-          fileType, 
-          fileSize, 
-          3600, 
+          s3Key,
+          fileType,
+          fileSize,
+          3600,
           videoMetadata
         );
       } else {
         result = await s3Utils.generatePresignedUrl(
-          s3Key, 
-          fileType, 
-          captureType === 'video' ? 7200 : 3600, 
+          s3Key,
+          fileType,
+          captureType === "video" ? 7200 : 3600,
           videoMetadata
         );
       }
@@ -124,7 +128,7 @@ const uploadController = {
         fileUrl: result.fileUrl || fileMetadata.file_url,
         fileName: fileName,
         key: s3Key,
-        expiresIn: result.expiresIn || (captureType === 'video' ? 7200 : 3600),
+        expiresIn: result.expiresIn || (captureType === "video" ? 7200 : 3600),
         method: result.method || uploadMethod,
         fields: result.fields,
         headers: result.headers,
@@ -138,11 +142,12 @@ const uploadController = {
           description,
           sourceUrl,
           sessionId,
-          videoMetadata: captureType === 'video' ? videoMetadata : undefined
+          videoMetadata: captureType === "video" ? videoMetadata : undefined,
         },
+        caseId,
       });
     } catch (error) {
-      console.error('Error generating presigned URL:', error);
+      console.error("Error generating presigned URL:", error);
       next(error);
     }
   },
@@ -184,10 +189,10 @@ const uploadController = {
         fileId,
         uploadId: file.multipart_upload_id,
         partUrls,
-        expiresIn: 7200
+        expiresIn: 7200,
       });
     } catch (error) {
-      console.error('Error generating multipart part URLs:', error);
+      console.error("Error generating multipart part URLs:", error);
       next(error);
     }
   },
@@ -233,11 +238,15 @@ const uploadController = {
           etag: s3Metadata.etag,
           serverSideEncryption: s3Metadata.serverSideEncryption,
           storageClass: s3Metadata.storageClass,
-        }
+        },
       });
 
       // Update case metadata
-      await updateCaseMetadata(file.case_id, file.capture_type, s3Metadata.contentLength);
+      await updateCaseMetadata(
+        file.case_id,
+        file.capture_type,
+        s3Metadata.contentLength
+      );
 
       res.json({
         success: true,
@@ -246,7 +255,7 @@ const uploadController = {
         message: "Multipart upload completed successfully",
       });
     } catch (error) {
-      console.error('Error completing multipart upload:', error);
+      console.error("Error completing multipart upload:", error);
       next(error);
     }
   },
@@ -273,17 +282,20 @@ const uploadController = {
       }
 
       // Abort multipart upload
-      await s3Utils.abortMultipartUpload(file.file_key, file.multipart_upload_id);
+      await s3Utils.abortMultipartUpload(
+        file.file_key,
+        file.multipart_upload_id
+      );
 
       // Update file status in database
-      await File.updateStatus(fileId, 'failed');
+      await File.updateStatus(fileId, "failed");
 
       res.json({
         success: true,
         message: "Multipart upload aborted successfully",
       });
     } catch (error) {
-      console.error('Error aborting multipart upload:', error);
+      console.error("Error aborting multipart upload:", error);
       next(error);
     }
   },
@@ -291,16 +303,16 @@ const uploadController = {
   // Confirm successful upload with video support
   confirmUpload: async (req, res, next) => {
     try {
-      const { 
-        fileId, 
-        fileKey, 
-        actualFileSize, 
-        checksum, 
-        uploadMethod,
+      const {
+        fileId,
+        fileKey,
+        actualFileSize,
+        checksum,
+        caseId,
         description,
         sourceUrl,
         videoMetadata = {},
-        processingRequests = []
+        processingRequests = [],
       } = req.body;
 
       if (!fileId && !fileKey) {
@@ -328,7 +340,7 @@ const uploadController = {
       // Verify file exists in S3
       const exists = await s3Utils.fileExists(file.file_key);
       if (!exists) {
-        await File.updateStatus(file.id, 'failed');
+        await File.updateStatus(file.id, "failed");
         return res.status(400).json({
           error: "File not found in S3",
           code: "S3_FILE_NOT_FOUND",
@@ -349,33 +361,14 @@ const uploadController = {
           etag: s3Metadata.etag,
           serverSideEncryption: s3Metadata.serverSideEncryption,
           storageClass: s3Metadata.storageClass,
-        }
+        },
       });
 
-      // Update additional metadata if provided
-      if (description !== undefined || sourceUrl !== undefined || Object.keys(videoMetadata).length > 0) {
-        const metadataUpdate = {};
-        if (description !== undefined) metadataUpdate.description = description;
-        if (sourceUrl !== undefined) metadataUpdate.source_url = sourceUrl;
-        if (file.capture_type === 'video' && Object.keys(videoMetadata).length > 0) {
-          metadataUpdate.video_metadata = { ...file.video_metadata, ...videoMetadata };
-        }
-        
-        await File.updateMetadata(file.id, metadataUpdate);
-      }
-
-      // Update case metadata
       await updateCaseMetadata(
-        file.case_id, 
-        file.capture_type, 
+        caseId,
+        file.capture_type,
         actualFileSize || s3Metadata.contentLength
       );
-
-      // Start video processing if requested
-      if (file.capture_type === 'video' && processingRequests.length > 0) {
-        // TODO: Integrate with video processing service
-        console.log(`Video processing requested: ${processingRequests.join(', ')}`);
-      }
 
       res.json({
         success: true,
@@ -383,7 +376,7 @@ const uploadController = {
         message: "Upload confirmed successfully",
       });
     } catch (error) {
-      console.error('Error confirming upload:', error);
+      console.error("Error confirming upload:", error);
       next(error);
     }
   },
@@ -415,8 +408,11 @@ const uploadController = {
       const metadataUpdate = {};
       if (description !== undefined) metadataUpdate.description = description;
       if (sourceUrl !== undefined) metadataUpdate.source_url = sourceUrl;
-      if (file.capture_type === 'video' && videoMetadata) {
-        metadataUpdate.video_metadata = { ...file.video_metadata, ...videoMetadata };
+      if (file.capture_type === "video" && videoMetadata) {
+        metadataUpdate.video_metadata = {
+          ...file.video_metadata,
+          ...videoMetadata,
+        };
       }
 
       const updatedFile = await File.updateMetadata(file.id, metadataUpdate);
@@ -427,7 +423,7 @@ const uploadController = {
         message: "File metadata updated successfully",
       });
     } catch (error) {
-      console.error('Error updating file metadata:', error);
+      console.error("Error updating file metadata:", error);
       next(error);
     }
   },
@@ -464,7 +460,10 @@ const uploadController = {
       // Abort multipart upload if still in progress
       if (file.multipart_upload_id) {
         try {
-          await s3Utils.abortMultipartUpload(file.file_key, file.multipart_upload_id);
+          await s3Utils.abortMultipartUpload(
+            file.file_key,
+            file.multipart_upload_id
+          );
         } catch (error) {
           console.warn(`Failed to abort multipart upload: ${error.message}`);
         }
@@ -478,8 +477,8 @@ const uploadController = {
 
       // Update case metadata
       await updateCaseMetadata(
-        caseId || file.case_id, 
-        file.capture_type, 
+        caseId || file.case_id,
+        file.capture_type,
         -file.file_size
       );
 
@@ -492,11 +491,11 @@ const uploadController = {
           description: file.description,
           sourceUrl: file.source_url,
           captureType: file.capture_type,
-          fileSize: file.file_size
+          fileSize: file.file_size,
         },
       });
     } catch (error) {
-      console.error('Error deleting file:', error);
+      console.error("Error deleting file:", error);
       next(error);
     }
   },
@@ -505,17 +504,17 @@ const uploadController = {
   getCaseFiles: async (req, res, next) => {
     try {
       const { caseId } = req.params;
-      const { 
-        captureType, 
-        page = 1, 
-        limit = 20, 
-        sortBy = 'date', 
-        sortOrder = 'desc',
+      const {
+        captureType,
+        page = 1,
+        limit = 20,
+        sortBy = "date",
+        sortOrder = "desc",
         search,
         videoDuration,
         videoResolution,
         videoCodec,
-        hasAudio
+        hasAudio,
       } = req.query;
 
       // Check if case exists
@@ -538,7 +537,7 @@ const uploadController = {
         videoDuration,
         videoResolution,
         videoCodec,
-        hasAudio
+        hasAudio,
       };
 
       const caseFiles = await File.findByCaseId(caseId, filters);
@@ -576,7 +575,7 @@ const uploadController = {
           limit: parseInt(limit),
           total: summary.total,
           totalPages: Math.ceil(summary.total / limit),
-          hasNext: (page * limit) < summary.total,
+          hasNext: page * limit < summary.total,
           hasPrev: page > 1,
         },
         summary,
@@ -590,11 +589,11 @@ const uploadController = {
           videoDuration,
           videoResolution,
           videoCodec,
-          hasAudio
+          hasAudio,
         },
       });
     } catch (error) {
-      console.error('Error getting case files:', error);
+      console.error("Error getting case files:", error);
       next(error);
     }
   },
@@ -602,7 +601,7 @@ const uploadController = {
   // Search files with video support
   searchFiles: async (req, res, next) => {
     try {
-      const { 
+      const {
         query: searchQuery,
         captureType,
         caseId,
@@ -611,7 +610,7 @@ const uploadController = {
         videoDuration,
         videoResolution,
         videoCodec,
-        hasAudio
+        hasAudio,
       } = req.query;
 
       if (!searchQuery || searchQuery.trim().length < 2) {
@@ -629,7 +628,7 @@ const uploadController = {
         videoDuration,
         videoResolution,
         videoCodec,
-        hasAudio
+        hasAudio,
       };
 
       const searchResults = await File.searchFiles(searchQuery, filters);
@@ -642,7 +641,7 @@ const uploadController = {
           limit: parseInt(limit),
           total: summary.total,
           totalPages: Math.ceil(summary.total / limit),
-          hasNext: (page * limit) < summary.total,
+          hasNext: page * limit < summary.total,
           hasPrev: page > 1,
         },
         query: searchQuery,
@@ -653,11 +652,11 @@ const uploadController = {
           videoDuration,
           videoResolution,
           videoCodec,
-          hasAudio
-        }
+          hasAudio,
+        },
       });
     } catch (error) {
-      console.error('Error searching files:', error);
+      console.error("Error searching files:", error);
       next(error);
     }
   },
@@ -679,11 +678,17 @@ const uploadController = {
         caseId,
         page: parseInt(page),
         limit: parseInt(limit),
-        captureType
+        captureType,
       };
 
-      const urlFiles = await File.getFilesBySourceUrl(decodeURIComponent(sourceUrl), filters);
-      const summary = await File.getSourceUrlSummary(decodeURIComponent(sourceUrl), filters);
+      const urlFiles = await File.getFilesBySourceUrl(
+        decodeURIComponent(sourceUrl),
+        filters
+      );
+      const summary = await File.getSourceUrlSummary(
+        decodeURIComponent(sourceUrl),
+        filters
+      );
 
       res.json({
         files: urlFiles,
@@ -692,14 +697,14 @@ const uploadController = {
           limit: parseInt(limit),
           total: summary.total,
           totalPages: Math.ceil(summary.total / limit),
-          hasNext: (page * limit) < summary.total,
+          hasNext: page * limit < summary.total,
           hasPrev: page > 1,
         },
         sourceUrl: decodeURIComponent(sourceUrl),
         summary,
       });
     } catch (error) {
-      console.error('Error getting files by source URL:', error);
+      console.error("Error getting files by source URL:", error);
       next(error);
     }
   },
@@ -708,14 +713,20 @@ const uploadController = {
   getFilesBySession: async (req, res, next) => {
     try {
       const { sessionId } = req.params;
-      const { caseId, page = 1, limit = 20, sortBy = 'date', sortOrder = 'desc' } = req.query;
+      const {
+        caseId,
+        page = 1,
+        limit = 20,
+        sortBy = "date",
+        sortOrder = "desc",
+      } = req.query;
 
       const filters = {
         caseId,
         page: parseInt(page),
         limit: parseInt(limit),
         sortBy,
-        sortOrder
+        sortOrder,
       };
 
       const sessionFiles = await File.getFilesBySession(sessionId, filters);
@@ -728,7 +739,7 @@ const uploadController = {
           limit: parseInt(limit),
           total: summary.total,
           totalPages: Math.ceil(summary.total / limit),
-          hasNext: (page * limit) < summary.total,
+          hasNext: page * limit < summary.total,
           hasPrev: page > 1,
         },
         sessionId,
@@ -739,7 +750,7 @@ const uploadController = {
         },
       });
     } catch (error) {
-      console.error('Error getting files by session:', error);
+      console.error("Error getting files by session:", error);
       next(error);
     }
   },
@@ -748,7 +759,13 @@ const uploadController = {
   getDownloadUrl: async (req, res, next) => {
     try {
       const { fileKey } = req.params;
-      const { expiresIn = 3600, download = false, filename, quality = 'original', format = 'original' } = req.query;
+      const {
+        expiresIn = 3600,
+        download = false,
+        filename,
+        quality = "original",
+        format = "original",
+      } = req.query;
 
       // Find file metadata in database
       const file = await File.findByKey(fileKey);
@@ -762,7 +779,10 @@ const uploadController = {
       let actualFileKey = fileKey;
 
       // Handle video quality/format conversion for future implementation
-      if (file.capture_type === 'video' && (quality !== 'original' || format !== 'original')) {
+      if (
+        file.capture_type === "video" &&
+        (quality !== "original" || format !== "original")
+      ) {
         // TODO: Implement video transcoding logic
         console.log(`Video conversion requested: ${quality}, ${format}`);
         // For now, use original file
@@ -772,7 +792,7 @@ const uploadController = {
       const downloadUrl = await s3Utils.generateDownloadUrl(
         actualFileKey,
         parseInt(expiresIn),
-        download ? (filename || file.original_name) : null
+        download ? filename || file.original_name : null
       );
 
       res.json({
@@ -793,7 +813,7 @@ const uploadController = {
         requestedFormat: format,
       });
     } catch (error) {
-      console.error('Error getting download URL:', error);
+      console.error("Error getting download URL:", error);
       next(error);
     }
   },
@@ -801,20 +821,20 @@ const uploadController = {
   // Get upload statistics with comprehensive video metrics
   getUploadStats: async (req, res, next) => {
     try {
-      const { 
-        caseId, 
-        userId, 
-        days = 30, 
-        detailed = false, 
+      const {
+        caseId,
+        userId,
+        days = 30,
+        detailed = false,
         captureType,
-        includeVideoMetrics = true 
+        includeVideoMetrics = true,
       } = req.query;
 
       const filters = {
         caseId,
         userId,
         days: parseInt(days),
-        captureType
+        captureType,
       };
 
       const stats = await File.getStats(filters);
@@ -826,14 +846,14 @@ const uploadController = {
       }
 
       // Add video-specific metrics
-      if (includeVideoMetrics && captureType !== 'screenshot') {
+      if (includeVideoMetrics && captureType !== "screenshot") {
         const videoStats = await File.getVideoStats(filters);
         stats.videoMetrics = videoStats;
       }
 
       res.json(stats);
     } catch (error) {
-      console.error('Error getting upload stats:', error);
+      console.error("Error getting upload stats:", error);
       next(error);
     }
   },
@@ -859,21 +879,25 @@ const uploadController = {
       const response = {
         ...file,
         s3Metadata,
-        storageStats: s3Utils.calculateStorageCosts(file.file_size, s3Metadata.storageClass, file.capture_type === 'video'),
+        storageStats: s3Utils.calculateStorageCosts(
+          file.file_size,
+          s3Metadata.storageClass,
+          file.capture_type === "video"
+        ),
       };
 
       // Add video-specific details
-      if (file.capture_type === 'video') {
+      if (file.capture_type === "video") {
         response.videoAnalysis = {
           estimatedBandwidth: calculateVideoBandwidth(file),
           storageOptimization: getVideoStorageRecommendations(file),
-          streamingCompatibility: getStreamingCompatibility(file)
+          streamingCompatibility: getStreamingCompatibility(file),
         };
       }
 
       res.json(response);
     } catch (error) {
-      console.error('Error getting file details:', error);
+      console.error("Error getting file details:", error);
       next(error);
     }
   },
@@ -884,24 +908,27 @@ const uploadController = {
       const { fileKey } = req.params;
 
       const exists = await s3Utils.fileExists(fileKey);
-      
+
       if (exists) {
         const metadata = await s3Utils.getFileMetadata(fileKey);
         res.set({
-          'Content-Length': metadata.contentLength,
-          'Content-Type': metadata.contentType,
-          'Last-Modified': metadata.lastModified,
-          'ETag': metadata.etag,
-          'X-Video-Duration': metadata.metadata?.['video-duration'] || '',
-          'X-Video-Resolution': metadata.metadata?.['video-width'] && metadata.metadata?.['video-height'] ? 
-            `${metadata.metadata['video-width']}x${metadata.metadata['video-height']}` : '',
+          "Content-Length": metadata.contentLength,
+          "Content-Type": metadata.contentType,
+          "Last-Modified": metadata.lastModified,
+          ETag: metadata.etag,
+          "X-Video-Duration": metadata.metadata?.["video-duration"] || "",
+          "X-Video-Resolution":
+            metadata.metadata?.["video-width"] &&
+            metadata.metadata?.["video-height"]
+              ? `${metadata.metadata["video-width"]}x${metadata.metadata["video-height"]}`
+              : "",
         });
         res.status(200).end();
       } else {
         res.status(404).end();
       }
     } catch (error) {
-      console.error('Error checking file existence:', error);
+      console.error("Error checking file existence:", error);
       res.status(500).end();
     }
   },
@@ -909,7 +936,11 @@ const uploadController = {
   // Get storage costs
   getStorageCosts: async (req, res, next) => {
     try {
-      const { caseId, storageClass = 'STANDARD', includeVideoOptimization = true } = req.query;
+      const {
+        caseId,
+        storageClass = "STANDARD",
+        includeVideoOptimization = true,
+      } = req.query;
 
       const filters = { caseId };
       const stats = await File.getStats(filters);
@@ -926,19 +957,27 @@ const uploadController = {
           perGB: costs.monthly / costs.sizeGB || 0,
           videos: {
             count: parseInt(stats.videos || 0),
-            monthlyCost: costs.monthly * (parseInt(stats.videos || 0) / parseInt(stats.total_files || 1))
+            monthlyCost:
+              costs.monthly *
+              (parseInt(stats.videos || 0) / parseInt(stats.total_files || 1)),
           },
           screenshots: {
             count: parseInt(stats.screenshots || 0),
-            monthlyCost: costs.monthly * (parseInt(stats.screenshots || 0) / parseInt(stats.total_files || 1))
-          }
+            monthlyCost:
+              costs.monthly *
+              (parseInt(stats.screenshots || 0) /
+                parseInt(stats.total_files || 1)),
+          },
         },
-        recommendations: generateStorageRecommendations(totalSize, parseInt(stats.total_files || 0))
+        recommendations: generateStorageRecommendations(
+          totalSize,
+          parseInt(stats.total_files || 0)
+        ),
       };
 
       res.json(response);
     } catch (error) {
-      console.error('Error getting storage costs:', error);
+      console.error("Error getting storage costs:", error);
       next(error);
     }
   },
@@ -959,8 +998,10 @@ const uploadController = {
       }
 
       // Validate storage class for video files
-      if (file.capture_type === 'video' && storageClass === 'DEEP_ARCHIVE') {
-        console.warn('DEEP_ARCHIVE not recommended for video files due to long retrieval times');
+      if (file.capture_type === "video" && storageClass === "DEEP_ARCHIVE") {
+        console.warn(
+          "DEEP_ARCHIVE not recommended for video files due to long retrieval times"
+        );
       }
 
       // Note: In a real implementation, you would use S3's CopyObject API
@@ -968,9 +1009,9 @@ const uploadController = {
       await File.updateStorageClass(file.id, storageClass);
 
       const newCosts = s3Utils.calculateStorageCosts(
-        file.file_size, 
-        storageClass, 
-        file.capture_type === 'video'
+        file.file_size,
+        storageClass,
+        file.capture_type === "video"
       );
 
       res.json({
@@ -980,19 +1021,20 @@ const uploadController = {
         costImpact: {
           newMonthlyCost: newCosts.monthly,
           previousCost: s3Utils.calculateStorageCosts(
-            file.file_size, 
-            'STANDARD', 
-            file.capture_type === 'video'
+            file.file_size,
+            "STANDARD",
+            file.capture_type === "video"
           ).monthly,
-          savings: s3Utils.calculateStorageCosts(
-            file.file_size, 
-            'STANDARD', 
-            file.capture_type === 'video'
-          ).monthly - newCosts.monthly
-        }
+          savings:
+            s3Utils.calculateStorageCosts(
+              file.file_size,
+              "STANDARD",
+              file.capture_type === "video"
+            ).monthly - newCosts.monthly,
+        },
       });
     } catch (error) {
-      console.error('Error changing storage class:', error);
+      console.error("Error changing storage class:", error);
       next(error);
     }
   },
@@ -1005,105 +1047,116 @@ const uploadController = {
 async function updateCaseMetadata(caseId, captureType, fileSizeDelta) {
   try {
     const metadata = {};
-    
-    if (captureType === 'screenshot') {
+
+    if (captureType === "screenshot") {
       metadata.totalScreenshots = fileSizeDelta > 0 ? 1 : -1;
-    } else if (captureType === 'video') {
+    } else if (captureType === "video") {
       metadata.totalVideos = fileSizeDelta > 0 ? 1 : -1;
     }
-    
+
     metadata.totalFileSize = fileSizeDelta;
     metadata.lastActivity = new Date().toISOString();
 
     await Case.updateMetadata(caseId, metadata);
   } catch (error) {
-    console.error('Error updating case metadata:', error);
+    console.error("Error updating case metadata:", error);
   }
 }
 
 // Helper functions for video analysis
 function calculateVideoBandwidth(file) {
-  if (file.capture_type !== 'video' || !file.video_metadata?.duration) {
+  if (file.capture_type !== "video" || !file.video_metadata?.duration) {
     return null;
   }
-  
+
   return {
     bitsPerSecond: (file.file_size * 8) / file.video_metadata.duration,
-    mbitsPerSecond: ((file.file_size * 8) / file.video_metadata.duration) / 1000000,
-    recommendation: getBandwidthRecommendation((file.file_size * 8) / file.video_metadata.duration)
+    mbitsPerSecond:
+      (file.file_size * 8) / file.video_metadata.duration / 1000000,
+    recommendation: getBandwidthRecommendation(
+      (file.file_size * 8) / file.video_metadata.duration
+    ),
   };
 }
 
 function getBandwidthRecommendation(bps) {
-  if (bps < 500000) return 'Low quality - suitable for basic documentation';
-  if (bps < 2000000) return 'Medium quality - good for most screen recordings';
-  if (bps < 8000000) return 'High quality - excellent for detailed capture';
-  return 'Very high quality - may be unnecessarily large';
+  if (bps < 500000) return "Low quality - suitable for basic documentation";
+  if (bps < 2000000) return "Medium quality - good for most screen recordings";
+  if (bps < 8000000) return "High quality - excellent for detailed capture";
+  return "Very high quality - may be unnecessarily large";
 }
 
 function getVideoStorageRecommendations(file) {
   const recommendations = [];
-  
-  if (file.file_size > 50 * 1024 * 1024) { // > 50MB
-    recommendations.push('Consider Standard-IA storage class for cost savings');
+
+  if (file.file_size > 50 * 1024 * 1024) {
+    // > 50MB
+    recommendations.push("Consider Standard-IA storage class for cost savings");
   }
-  
-  if (file.video_metadata?.duration > 600) { // > 10 minutes
-    recommendations.push('Long video - consider compression or segmentation');
+
+  if (file.video_metadata?.duration > 600) {
+    // > 10 minutes
+    recommendations.push("Long video - consider compression or segmentation");
   }
-  
-  const daysSinceUpload = (Date.now() - new Date(file.uploaded_at || file.created_at)) / (1000 * 60 * 60 * 24);
+
+  const daysSinceUpload =
+    (Date.now() - new Date(file.uploaded_at || file.created_at)) /
+    (1000 * 60 * 60 * 24);
   if (daysSinceUpload > 30) {
-    recommendations.push('Old video - candidate for archival storage');
+    recommendations.push("Old video - candidate for archival storage");
   }
-  
+
   return recommendations;
 }
 
 function getStreamingCompatibility(file) {
-  if (file.capture_type !== 'video') return null;
-  
+  if (file.capture_type !== "video") return null;
+
   const codec = file.video_metadata?.codec?.toLowerCase();
-  const format = file.file_type?.split('/')[1];
-  
+  const format = file.file_type?.split("/")[1];
+
   return {
-    webCompatible: ['h264', 'vp8', 'vp9'].includes(codec) && ['mp4', 'webm'].includes(format),
-    mobileCompatible: codec === 'h264' && format === 'mp4',
+    webCompatible:
+      ["h264", "vp8", "vp9"].includes(codec) &&
+      ["mp4", "webm"].includes(format),
+    mobileCompatible: codec === "h264" && format === "mp4",
     browserSupport: {
-      chrome: ['h264', 'vp8', 'vp9', 'av1'].includes(codec),
-      firefox: ['h264', 'vp8', 'vp9', 'av1'].includes(codec),
-      safari: ['h264'].includes(codec)
+      chrome: ["h264", "vp8", "vp9", "av1"].includes(codec),
+      firefox: ["h264", "vp8", "vp9", "av1"].includes(codec),
+      safari: ["h264"].includes(codec),
     },
-    recommendation: getStreamingRecommendation(codec, format)
+    recommendation: getStreamingRecommendation(codec, format),
   };
 }
 
 function getStreamingRecommendation(codec, format) {
-  if (codec === 'h264' && format === 'mp4') {
-    return 'Optimal for streaming - universally supported';
+  if (codec === "h264" && format === "mp4") {
+    return "Optimal for streaming - universally supported";
   }
-  if (codec === 'vp9' && format === 'webm') {
-    return 'Good for web streaming - modern browser support';
+  if (codec === "vp9" && format === "webm") {
+    return "Good for web streaming - modern browser support";
   }
-  return 'May need transcoding for optimal streaming compatibility';
+  return "May need transcoding for optimal streaming compatibility";
 }
 
 function generateStorageRecommendations(totalSize, fileCount) {
   const recommendations = [];
 
-  if (totalSize > 1024 * 1024 * 1024) { // > 1GB
+  if (totalSize > 1024 * 1024 * 1024) {
+    // > 1GB
     recommendations.push({
-      type: 'storage_class',
-      message: 'Consider moving old files to STANDARD_IA or GLACIER to reduce costs',
-      potentialSavings: 'Up to 40% cost reduction'
+      type: "storage_class",
+      message:
+        "Consider moving old files to STANDARD_IA or GLACIER to reduce costs",
+      potentialSavings: "Up to 40% cost reduction",
     });
   }
 
   if (fileCount > 1000) {
     recommendations.push({
-      type: 'lifecycle',
+      type: "lifecycle",
       message: `Large number of files (${fileCount}) - implement lifecycle policies`,
-      potentialSavings: 'Automated cost optimization'
+      potentialSavings: "Automated cost optimization",
     });
   }
 
