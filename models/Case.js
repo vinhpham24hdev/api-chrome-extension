@@ -197,6 +197,10 @@ class Case {
       updatedMetadata.lastActivity = metadata.lastActivity;
     }
 
+    if(metadata.reportHtml) {
+      updatedMetadata.reportHtml = metadata.reportHtml
+    }    
+
     const result = await db.query(`
       UPDATE cases 
       SET metadata = $1, updated_at = NOW() 
