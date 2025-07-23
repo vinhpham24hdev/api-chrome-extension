@@ -218,22 +218,38 @@ const s3Utils = {
         `🔗 Generating presigned URL for ${key} with type ${fileType}`
       );
 
-      // ✅ Enhanced metadata for videos
+      // ✅ CRITICAL FIX: Clean content-type để tránh lỗi signature
+      const cleanContentType = fileType.split(";")[0].trim();
+      console.log(
+        `📝 Content-type cleaned: ${fileType} -> ${cleanContentType}`
+      );
+
+      // Extract codec info từ content-type nếu có
+      let detectedCodec = null;
+      const codecMatch = fileType.match(/codecs=([^;,]+)/i);
+      if (codecMatch) {
+        detectedCodec = codecMatch[1].replace(/"/g, "").toLowerCase();
+        console.log(`🎥 Detected codec: ${detectedCodec}`);
+      }
+
       const metadata = {
         "uploaded-by": "cellebrite-capture-tool",
         "upload-timestamp": new Date().toISOString(),
-        "file-type": fileType,
+        "file-type": cleanContentType, // Use clean type
       };
 
       // Add video-specific metadata
-      if (fileType.startsWith("video/")) {
+      if (cleanContentType.startsWith("video/")) {
         if (videoMetadata.duration)
           metadata["video-duration"] = videoMetadata.duration.toString();
         if (videoMetadata.width)
           metadata["video-width"] = videoMetadata.width.toString();
         if (videoMetadata.height)
           metadata["video-height"] = videoMetadata.height.toString();
-        if (videoMetadata.codec) metadata["video-codec"] = videoMetadata.codec;
+        // Store codec in metadata instead of content-type
+        if (detectedCodec || videoMetadata.codec) {
+          metadata["video-codec"] = detectedCodec || videoMetadata.codec;
+        }
         if (videoMetadata.bitrate)
           metadata["video-bitrate"] = videoMetadata.bitrate.toString();
       }
@@ -241,19 +257,14 @@ const s3Utils = {
       const command = new PutObjectCommand({
         Bucket: BUCKET_NAME,
         Key: key,
-        ContentType: fileType,
+        ContentType: cleanContentType, // ✅ Use clean content-type
         ServerSideEncryption: "AES256",
         Metadata: metadata,
-        // ✅ Video-specific storage optimizations
-        StorageClass: fileType.startsWith("video/") ? "STANDARD" : "STANDARD",
-        ContentDisposition: fileType.startsWith("video/")
-          ? "inline"
-          : undefined,
+        StorageClass: "STANDARD",
       });
 
       const uploadUrl = await getSignedUrl(s3Client, command, {
-        expiresIn: fileType.startsWith("video/") ? 7200 : expiresIn, // ✅ Longer expiry for videos
-        signableHeaders: new Set(["content-type"]),
+        expiresIn: cleanContentType.startsWith("video/") ? 7200 : expiresIn,
       });
 
       const fileUrl = `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
@@ -265,9 +276,9 @@ const s3Utils = {
         fileUrl,
         method: "PUT",
         headers: {
-          "Content-Type": fileType,
+          "Content-Type": cleanContentType, // ✅ Return clean content-type
         },
-        expiresIn: fileType.startsWith("video/") ? 7200 : expiresIn,
+        expiresIn: cleanContentType.startsWith("video/") ? 7200 : expiresIn,
       };
     } catch (error) {
       console.error("❌ Error generating presigned URL:", error);
